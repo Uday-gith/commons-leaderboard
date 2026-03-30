@@ -3,111 +3,164 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wikimedia Commons Leaderboard</title>
+    <title>Wiki Club SATI Leaderboard</title>
     <style>
-        body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; line-height: 1.6; }
-        input { padding: 10px; width: 70%; border: 1px solid #ccc; border-radius: 4px; }
-        button { padding: 10px 20px; cursor: pointer; background: #36c; color: white; border: none; border-radius: 4px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
-        th { background-color: #f4f4f4; }
-        .loading { color: #666; font-style: italic; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 900px; margin: 40px auto; padding: 20px; color: #333; }
+        .container { background: #f9f9f9; padding: 30px; border-radius: 8px; border: 1px solid #ddd; }
+        h2 { border-bottom: 2px solid #36c; padding-bottom: 10px; color: #202122; }
+        input { padding: 12px; width: 65%; border: 1px solid #a2a9b1; border-radius: 2px; font-size: 16px; }
+        button { padding: 12px 24px; cursor: pointer; background: #36c; color: white; border: none; border-radius: 2px; font-weight: bold; transition: 0.2s; }
+        button:hover { background: #447ff5; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; background: white; }
+        th, td { border: 1px solid #a2a9b1; padding: 12px; text-align: left; }
+        th { background-color: #eaecf0; }
+        tr:nth-child(even) { background-color: #f8f9fa; }
+        .status-box { margin: 15px 0; font-weight: bold; color: #72777d; }
+        #downloadBtn { background: #00af89; margin-top: 10px; display: none; }
     </style>
 </head>
 <body>
-    <h2>Commons Category Leaderboard</h2>
-    <p>Enter a category name (e.g., <i>Images from Khajuraho Dance Festival 2026</i>) to see upload stats.</p>
-    
-    <input type="text" id="categoryInput" placeholder="Category name...">
-    <button onclick="generateLeaderboard()">Generate</button>
 
-    <div id="status" class="loading"></div>
+<div class="container">
+    <h2>Wikimedia Commons Leaderboard</h2>
+    <p>Enter the category name to find the top uploaders.</p>
+    
+    <input type="text" id="categoryInput" placeholder="e.g. Images from Khajuraho Dance Festival 2026">
+    <button onclick="startProcess()">Generate</button>
+
+    <div id="status" class="status-box"></div>
     
     <div id="results" style="display:none;">
-        <h3>Summary</h3>
-        <p id="totalUploads"></p>
-        <p id="topUploader"></p>
+        <div style="display:flex; justify-content: space-between; align-items: center;">
+            <h3 id="summaryTitle">Results</h3>
+            <button id="downloadBtn" onclick="downloadCSV()">Download CSV</button>
+        </div>
+        <p id="statSummary"></p>
         
         <table>
             <thead>
                 <tr>
                     <th>Rank</th>
                     <th>Username</th>
-                    <th>Uploads</th>
+                    <th>Files Uploaded</th>
                 </tr>
             </thead>
             <tbody id="leaderboardBody"></tbody>
         </table>
     </div>
+</div>
 
-    <script>
-        async function generateLeaderboard() {
-            const category = document.getElementById('categoryInput').value.trim();
-            const status = document.getElementById('status');
-            const resultsDiv = document.getElementById('results');
+<script>
+    async function apiCall(params) {
+        const url = new URL("https://commons.wikimedia.org/w/api.php");
+        params.origin = "*";
+        params.format = "json";
+        Object.keys(params).forEach(key => url.searchParams.append(key, params[key]));
+        const response = await fetch(url);
+        return await response.json();
+    }
+
+    async function startProcess() {
+        let category = document.getElementById('categoryInput').value.trim();
+        const status = document.getElementById('status');
+        const resultsDiv = document.getElementById('results');
+        
+        if (!category) return alert("Please enter a category name");
+        if (!category.startsWith("Category:")) category = "Category:" + category;
+
+        status.innerText = "Connecting to Wikimedia Commons...";
+        resultsDiv.style.display = "none";
+        const leaderboardBody = document.getElementById('leaderboardBody');
+        leaderboardBody.innerHTML = "";
+
+        try {
+            // 1. Get all files in category
+            let allFiles = [];
+            let continueToken = "";
             
-            if (!category) return alert("Please enter a category");
+            status.innerText = "Searching for files...";
+            
+            do {
+                const data = await apiCall({
+                    action: "query",
+                    list: "categorymembers",
+                    cmtitle: category,
+                    cmtype: "file",
+                    cmlimit: "500",
+                    cmcontinue: continueToken
+                });
 
-            status.innerText = "Fetching data from Wikimedia Commons... this may take a moment.";
-            resultsDiv.style.display = "none";
-
-            const url = `https://commons.wikimedia.org/w/api.php?action=query&list=categorymembers&cmtitle=Category:${encodeURIComponent(category)}&cmtype=file&cmlimit=500&prop=imageinfo&iiprop=user&format=json&origin=*`;
-
-            try {
-                const response = await fetch(url);
-                const data = await response.json();
-                const members = data.query.categorymembers;
-
-                if (!members || members.length === 0) {
-                    status.innerText = "No files found in this category.";
-                    return;
+                if (data.query && data.query.categorymembers) {
+                    allFiles = allFiles.concat(data.query.categorymembers);
                 }
+                continueToken = data.continue ? data.continue.cmcontinue : "";
+            } while (continueToken);
 
-                // Count uploads per user
-                const counts = {};
-                for (const file of members) {
-                    // Note: Basic categorymembers doesn't always include user. 
-                    // For a robust tool, we fetch imageinfo for the batch.
-                    const user = file.title; // Placeholder logic - for high accuracy, a second batch call is best.
-                }
+            if (allFiles.length === 0) {
+                status.innerText = "No files found. Check if the category name is exactly correct.";
+                return;
+            }
 
-                // Simplified Logic: Fetching users for the found files
-                const titles = members.map(m => m.title).join('|');
-                const infoUrl = `https://commons.wikimedia.org/w/api.php?action=query&titles=${encodeURIComponent(titles)}&prop=imageinfo&iiprop=user&format=json&origin=*`;
-                
-                const infoRes = await fetch(infoUrl);
-                const infoData = await infoRes.json();
+            // 2. Fetch uploaders in batches of 50 (API limit)
+            status.innerText = `Found ${allFiles.length} files. Identifying uploaders...`;
+            const userCounts = {};
+            
+            for (let i = 0; i < allFiles.length; i += 50) {
+                const batch = allFiles.slice(i, i + 50).map(f => f.title).join('|');
+                const infoData = await apiCall({
+                    action: "query",
+                    titles: batch,
+                    prop: "imageinfo",
+                    iiprop: "user"
+                });
+
                 const pages = infoData.query.pages;
-                
-                const userCounts = {};
                 Object.values(pages).forEach(page => {
-                    const user = page.imageinfo?.[0]?.user;
+                    const user = page.imageinfo ? page.imageinfo[0].user : null;
                     if (user) userCounts[user] = (userCounts[user] || 0) + 1;
                 });
 
-                displayResults(userCounts);
-                status.innerText = "";
-            } catch (error) {
-                status.innerText = "Error fetching data. Check the category name.";
+                status.innerText = `Processed ${Math.min(i + 50, allFiles.length)} / ${allFiles.length} files...`;
             }
+
+            displayResults(userCounts, allFiles.length);
+            status.innerText = "Done!";
+        } catch (error) {
+            console.error(error);
+            status.innerText = "An error occurred. Check the console (F12) for details.";
         }
+    }
 
-        function displayResults(userCounts) {
-            const sortedUsers = Object.entries(userCounts).sort((a, b) => b[1] - a[1]);
-            const body = document.getElementById('leaderboardBody');
-            body.innerHTML = "";
+    function displayResults(userCounts, total) {
+        const sorted = Object.entries(userCounts).sort((a, b) => b[1] - a[1]);
+        const body = document.getElementById('leaderboardBody');
+        
+        document.getElementById('statSummary').innerText = `Total files analyzed: ${total}. Top contributor: ${sorted[0][0]}`;
+        
+        sorted.forEach(([user, count], index) => {
+            const row = `<tr><td>${index + 1}</td><td>${user}</td><td>${count}</td></tr>`;
+            body.innerHTML += row;
+        });
 
-            let total = 0;
-            sortedUsers.forEach(([user, count], index) => {
-                total += count;
-                const row = `<tr><td>${index + 1}</td><td>${user}</td><td>${count}</td></tr>`;
-                body.innerHTML += row;
-            });
+        document.getElementById('results').style.display = "block";
+        document.getElementById('downloadBtn').style.display = "block";
+    }
 
-            document.getElementById('totalUploads').innerText = `Total Files: ${total}`;
-            document.getElementById('topUploader').innerText = `Winner: ${sortedUsers[0][0]}`;
-            document.getElementById('results').style.display = "block";
+    function downloadCSV() {
+        const rows = document.querySelectorAll("table tr");
+        let csv = "Rank,Username,Uploads\n";
+        for (let i = 1; i < rows.length; i++) {
+            const cols = rows[i].querySelectorAll("td");
+            csv += Array.from(cols).map(c => c.innerText).join(",") + "\n";
         }
-    </script>
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'leaderboard.csv';
+        a.click();
+    }
+</script>
+
 </body>
 </html>
