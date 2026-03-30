@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wikimedia Commons Leaderboard</title>
+    <style>
+        body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; line-height: 1.6; }
+        input { padding: 10px; width: 70%; border: 1px solid #ccc; border-radius: 4px; }
+        button { padding: 10px 20px; cursor: pointer; background: #36c; color: white; border: none; border-radius: 4px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background-color: #f4f4f4; }
+        .loading { color: #666; font-style: italic; }
+    </style>
+</head>
+<body>
+    <h2>Commons Category Leaderboard</h2>
+    <p>Enter a category name (e.g., <i>Images from Khajuraho Dance Festival 2026</i>) to see upload stats.</p>
+    
+    <input type="text" id="categoryInput" placeholder="Category name...">
+    <button onclick="generateLeaderboard()">Generate</button>
+
+    <div id="status" class="loading"></div>
+    
+    <div id="results" style="display:none;">
+        <h3>Summary</h3>
+        <p id="totalUploads"></p>
+        <p id="topUploader"></p>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th>Rank</th>
+                    <th>Username</th>
+                    <th>Uploads</th>
+                </tr>
+            </thead>
+            <tbody id="leaderboardBody"></tbody>
+        </table>
+    </div>
+
+    <script>
+        async function generateLeaderboard() {
+            const category = document.getElementById('categoryInput').value.trim();
+            const status = document.getElementById('status');
+            const resultsDiv = document.getElementById('results');
+            
+            if (!category) return alert("Please enter a category");
+
+            status.innerText = "Fetching data from Wikimedia Commons... this may take a moment.";
+            resultsDiv.style.display = "none";
+
+            const url = `https://commons.wikimedia.org/w/api.php?action=query&list=categorymembers&cmtitle=Category:${encodeURIComponent(category)}&cmtype=file&cmlimit=500&prop=imageinfo&iiprop=user&format=json&origin=*`;
+
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                const members = data.query.categorymembers;
+
+                if (!members || members.length === 0) {
+                    status.innerText = "No files found in this category.";
+                    return;
+                }
+
+                // Count uploads per user
+                const counts = {};
+                for (const file of members) {
+                    // Note: Basic categorymembers doesn't always include user. 
+                    // For a robust tool, we fetch imageinfo for the batch.
+                    const user = file.title; // Placeholder logic - for high accuracy, a second batch call is best.
+                }
+
+                // Simplified Logic: Fetching users for the found files
+                const titles = members.map(m => m.title).join('|');
+                const infoUrl = `https://commons.wikimedia.org/w/api.php?action=query&titles=${encodeURIComponent(titles)}&prop=imageinfo&iiprop=user&format=json&origin=*`;
+                
+                const infoRes = await fetch(infoUrl);
+                const infoData = await infoRes.json();
+                const pages = infoData.query.pages;
+                
+                const userCounts = {};
+                Object.values(pages).forEach(page => {
+                    const user = page.imageinfo?.[0]?.user;
+                    if (user) userCounts[user] = (userCounts[user] || 0) + 1;
+                });
+
+                displayResults(userCounts);
+                status.innerText = "";
+            } catch (error) {
+                status.innerText = "Error fetching data. Check the category name.";
+            }
+        }
+
+        function displayResults(userCounts) {
+            const sortedUsers = Object.entries(userCounts).sort((a, b) => b[1] - a[1]);
+            const body = document.getElementById('leaderboardBody');
+            body.innerHTML = "";
+
+            let total = 0;
+            sortedUsers.forEach(([user, count], index) => {
+                total += count;
+                const row = `<tr><td>${index + 1}</td><td>${user}</td><td>${count}</td></tr>`;
+                body.innerHTML += row;
+            });
+
+            document.getElementById('totalUploads').innerText = `Total Files: ${total}`;
+            document.getElementById('topUploader').innerText = `Winner: ${sortedUsers[0][0]}`;
+            document.getElementById('results').style.display = "block";
+        }
+    </script>
+</body>
+</html>
