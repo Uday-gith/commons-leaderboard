@@ -83,6 +83,9 @@
 
         button:hover { background: #2a4b8d; transform: translateY(-1px); }
 
+        #shareBtn { background: #54595d; }
+        #shareBtn:hover { background: #3f4245; }
+
         .status-box { margin: 15px 0; font-size: 0.95em; color: #54595d; font-weight: 500; }
 
         #results { margin-top: 30px; border-top: 1px solid #eaecf0; padding-top: 25px; }
@@ -146,6 +149,7 @@
     <div class="input-group">
         <input type="text" id="categoryInput" placeholder="Category:Images from Khajuraho Dance Festival 2026">
         <button onclick="startProcess()">Generate</button>
+        <button id="shareBtn" onclick="shareCategory()">Share</button>
     </div>
 
     <div id="status" class="status-box"></div>
@@ -177,6 +181,26 @@
 </footer>
 
 <script>
+    function normalizeCategory(value) {
+        const category = value.trim();
+        return category && category.startsWith("Category:") ? category : `Category:${category}`;
+    }
+
+    function categoryFromUrl() {
+        const params = new URLSearchParams(window.location.search);
+        const queryCategory = params.get("c");
+        if (queryCategory) return queryCategory;
+
+        const path = window.location.pathname;
+        const marker = "/index.html/";
+        const markerIndex = path.indexOf(marker);
+        if (markerIndex !== -1) {
+            return decodeURIComponent(path.slice(markerIndex + marker.length));
+        }
+
+        return "";
+    }
+
     async function apiCall(params) {
         const url = new URL("https://commons.wikimedia.org/w/api.php");
         params.origin = "*";
@@ -192,7 +216,8 @@
         const resultsDiv = document.getElementById('results');
         
         if (!category) return alert("Please enter a category name");
-        if (!category.startsWith("Category:")) category = "Category:" + category;
+        category = normalizeCategory(category);
+        document.getElementById('categoryInput').value = category;
 
         status.innerText = "Connecting to API...";
         resultsDiv.style.display = "none";
@@ -251,6 +276,32 @@
         }
     }
 
+    async function shareCategory() {
+        const input = document.getElementById('categoryInput');
+        const category = input.value.trim();
+        const status = document.getElementById('status');
+
+        if (!category) {
+            input.focus();
+            status.innerText = "Enter a category before sharing.";
+            return;
+        }
+
+        const normalizedCategory = normalizeCategory(category);
+        const shareUrl = new URL(window.location.href);
+        shareUrl.search = "";
+        shareUrl.hash = "";
+        shareUrl.searchParams.set("c", normalizedCategory);
+        const shareText = `Come explore the Commons leaderboard with me for ${normalizedCategory}! See who is making the biggest contribution: ${shareUrl.toString()}`;
+
+        try {
+            await navigator.clipboard.writeText(shareText);
+            status.innerText = "Share invitation copied to your clipboard!";
+        } catch (error) {
+            status.innerText = "Could not copy the share invitation.";
+        }
+    }
+
     function displayResults(userCounts, total) {
         const sorted = Object.entries(userCounts).sort((a, b) => b[1] - a[1]);
         const body = document.getElementById('leaderboardBody');
@@ -283,6 +334,12 @@
         a.href = url;
         a.download = 'leaderboard.csv';
         a.click();
+    }
+
+    const urlCategory = categoryFromUrl();
+    if (urlCategory) {
+        document.getElementById('categoryInput').value = urlCategory;
+        startProcess();
     }
 </script>
 
